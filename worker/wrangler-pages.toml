@@ -1,0 +1,6 @@
+name = "knitting-pages"
+main = "pages-proxy.js"
+compatibility_date = "2024-01-01"
+
+# Wildcard route for all subdomains
+routes = [{ pattern = "*.knitting.computer/*", zone_name = "knitting.computer" }]

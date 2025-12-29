@@ -1,0 +1,8 @@
+name = "cinema-computer-router"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "cinema.computer/*", zone_name = "cinema.computer" },
+  { pattern = "*.cinema.computer/*", zone_name = "cinema.computer" }
+]

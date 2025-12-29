@@ -1,0 +1,20 @@
+# Cloudflare Worker configuration for vibes.markets
+name = "vibes-markets-wildcard"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+workers_dev = true
+
+[vars]
+PAGES_HOSTNAME = "vibes-market.pages.dev"
+
+# KV namespace for tenant data (dedicated to vibes.markets)
+[[kv_namespaces]]
+binding = "TENANTS"
+id = "2f6ce241b01845ad8cdb1c52c0be42d4"
+
+# Routes for wildcard subdomains and API
+routes = [
+  { pattern = "*.vibes.markets/*", zone_name = "vibes.markets" },
+  { pattern = "vibes.markets/api/*", zone_name = "vibes.markets" },
+  { pattern = "vibes.markets/webhooks/*", zone_name = "vibes.markets" }
+]

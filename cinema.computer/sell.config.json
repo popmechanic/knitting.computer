@@ -1,0 +1,34 @@
+{
+  "app": {
+    "source": "app.jsx",
+    "name": "cinema-computer",
+    "title": "cinema.computer",
+    "tagline": "Your personal screening room"
+  },
+  "domain": "cinema.computer",
+  "pricing": {
+    "monthly": "$5",
+    "yearly": "$49"
+  },
+  "features": [
+    "Your own subdomain",
+    "Unlimited video hosting",
+    "Share with anyone",
+    "Dark cinema experience",
+    "No ads ever"
+  ],
+  "clerk": {
+    "publishableKey": "pk_test_bWlnaHR5LXN0YXJmaXNoLTM0LmNsZXJrLmFjY291bnRzLmRldiQ"
+  },
+  "admin": {
+    "userIds": ["user_37SeOghWZsRBbMUJXtSK9cxKETH"]
+  },
+  "cloudflare": {
+    "pagesProject": "cinema-computer",
+    "kvNamespaceId": "17e5c9f2fea442a68da19d05396272f6"
+  },
+  "deployment": {
+    "hash": "1e72699011d6",
+    "assembledAt": "2025-12-28T05:46:13.479Z"
+  }
+}

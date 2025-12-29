@@ -1,0 +1,11 @@
+name = "knitting-api"
+main = "api-proxy.js"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+# Routes - uncomment after adding knitting.computer to Cloudflare
+# routes = [{ pattern = "api.knitting.computer/*", zone_name = "knitting.computer" }]
+
+# For local development
+[dev]
+port = 8787

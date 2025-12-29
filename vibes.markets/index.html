@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>vibes.markets | Collective Foresight</title>
+  <meta name="description" content="Private prediction markets for teams and communities. See what the group truly believes." />
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.3.1",
+        "react-dom": "https://esm.sh/react-dom@18.3.1?deps=react@18.3.1",
+        "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1",
+        "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+        "use-fireproof": "https://esm.sh/use-fireproof@0.20.0-dev-preview-50?deps=react@18.3.1"
+      }
+    }
+  </script>
+  <script
+    data-clerk-publishable-key="pk_test_ZmVhc2libGUtcXVhaWwtNDMuY2xlcmsuYWNjb3VudHMuZGV2JA"
+    src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  ></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Space Grotesk', system-ui, sans-serif; }
+
+    /* Prismatic accent - very subtle rainbow */
+    .prismatic-border {
+      position: relative;
+    }
+    .prismatic-border::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      padding: 1px;
+      border-radius: inherit;
+      background: linear-gradient(135deg,
+        rgba(255,182,193,0.4),
+        rgba(255,218,185,0.4),
+        rgba(255,255,186,0.4),
+        rgba(186,255,201,0.4),
+        rgba(186,225,255,0.4),
+        rgba(218,186,255,0.4)
+      );
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    .prismatic-border:hover::before {
+      opacity: 1;
+    }
+
+    /* Subtle glass effect */
+    .glass {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    /* Soft prismatic gradient for special elements */
+    .prismatic-soft {
+      background: linear-gradient(135deg,
+        rgba(255,182,193,0.15),
+        rgba(186,225,255,0.15),
+        rgba(218,186,255,0.1)
+      );
+    }
+
+    /* Refined probability bar gradients */
+    .prob-yes { background: linear-gradient(90deg, #10b981, #34d399); }
+    .prob-no { background: linear-gradient(90deg, #f43f5e, #fb7185); }
+    .prob-alt { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+  </style>
+</head>
+<body class="bg-[#fafaf9]">
+  <div id="root"></div>
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+    import ReactDOMClient from "react-dom/client";
+    import { useFireproof } from "use-fireproof";
+
+    // Clerk integration
+    const useAuth = () => {
+      const [state, setState] = useState({ isLoaded: false, isSignedIn: false, user: null });
+      useEffect(() => {
+        const initClerk = async () => {
+          const Clerk = window.Clerk;
+          if (!Clerk) { setState({ isLoaded: true, isSignedIn: false, user: null }); return; }
+          await Clerk.load();
+          const update = () => setState({ isLoaded: true, isSignedIn: !!Clerk.user, user: Clerk.user });
+          update();
+          Clerk.addListener(update);
+        };
+        initClerk();
+      }, []);
+      return state;
+    };
+
+    const SignInButton = ({ children, className }) => (
+      <button onClick={() => window.Clerk?.loaded && window.Clerk.openSignIn()} className={className}>
+        {children || 'Sign In'}
+      </button>
+    );
+
+    const SignUpButton = ({ children, className }) => (
+      <button onClick={() => window.Clerk?.loaded && window.Clerk.openSignUp()} className={className}>
+        {children || 'Sign Up'}
+      </button>
+    );
+
+    const UserButton = () => {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (ref.current && window.Clerk?.user) {
+          window.Clerk.mountUserButton(ref.current, { afterSignOutUrl: window.location.href });
+        }
+      }, []);
+      return <div ref={ref} />;
+    };
+
+    // ============== SUBSCRIPTION GATE ==============
+    const SubscriptionGate = ({ children }) => {
+      const { user, isLoaded, isSignedIn } = useAuth();
+      const [registering, setRegistering] = useState(false);
+      const [registered, setRegistered] = useState(false);
+
+      // Check Clerk subscription (includes free plan)
+      const hasClerkSubscription = useMemo(() => {
+        if (!window.Clerk?.user) return false;
+        try {
+          // Check if user has any valid plan via Clerk's has() method
+          const clerk = window.Clerk;
+          if (clerk.user?.has) {
+            return clerk.user.has({ plan: 'free' }) ||
+                   clerk.user.has({ plan: 'pro' }) ||
+                   clerk.user.has({ plan: 'basic' }) ||
+                   clerk.user.has({ plan: 'monthly' }) ||
+                   clerk.user.has({ plan: 'yearly' }) ||
+                   clerk.user.has({ plan: 'starter' });
+          }
+        } catch (e) {}
+        return false;
+      }, [user]);
+
+      // Fallback: check unsafeMetadata for plan
+      const hasMetadataPlan = user?.unsafeMetadata?.plan &&
+        ['free', 'pro', 'basic', 'monthly', 'yearly', 'starter'].includes(user.unsafeMetadata.plan);
+
+      // Combined subscription check
+      const hasSubscription = isAdmin || hasClerkSubscription || hasMetadataPlan || registered;
+
+      // Auto-register for free plan if signed in but no subscription
+      useEffect(() => {
+        const registerFreePlan = async () => {
+          if (!isSignedIn || !user || !subdomain || hasSubscription || registering) return;
+          if (user.unsafeMetadata?.plan) {
+            setRegistered(true);
+            return;
+          }
+
+          setRegistering(true);
+          try {
+            // Update user metadata first
+            await user.update({
+              unsafeMetadata: {
+                ...user.unsafeMetadata,
+                plan: 'free',
+                subdomain,
+                registeredAt: new Date().toISOString()
+              }
+            });
+
+            // Register with worker API
+            await fetch(`https://${CONFIG.domain}/api/tenants/register`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                subdomain,
+                userId: user.id,
+                email: user.primaryEmailAddress?.emailAddress,
+                plan: 'free'
+              })
+            });
+
+            setRegistered(true);
+          } catch (err) {
+            console.error('Registration error:', err);
+          } finally {
+            setRegistering(false);
+          }
+        };
+
+        registerFreePlan();
+      }, [isSignedIn, user, hasSubscription, registering]);
+
+      if (!isLoaded) {
+        return (
+          <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center">
+            <div className="text-stone-400">Loading...</div>
+          </div>
+        );
+      }
+
+      if (registering) {
+        return (
+          <div className="min-h-screen bg-[#fafaf9] flex flex-col items-center justify-center">
+            <Logo size={48} className="animate-pulse mb-4" />
+            <p className="text-stone-500">Setting up your studio...</p>
+          </div>
+        );
+      }
+
+      return children;
+    };
+
+    // ============== CONFIG ==============
+    const CONFIG = {
+      appName: "vibes-markets",
+      appTitle: "vibes.markets",
+      domain: "vibes.markets",
+      pricing: { monthly: 9, yearly: 90 },
+    };
+
+    // ============== SUBDOMAIN DETECTION ==============
+    const getSubdomain = () => {
+      const host = window.location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1') {
+        return new URLSearchParams(window.location.search).get('subdomain') || null;
+      }
+      const parts = host.split('.');
+      if (parts.length > 2 || (parts.length === 2 && !['com', 'net', 'org', 'io', 'app', 'dev', 'markets', 'co'].includes(parts[1]))) {
+        return parts[0];
+      }
+      return null;
+    };
+
+    const subdomain = getSubdomain();
+    const isAdmin = subdomain === 'admin';
+    const isTenant = subdomain && !isAdmin;
+
+    // ============== REFINED LOGO ==============
+    const Logo = ({ size = 32, className = "" }) => (
+      <svg viewBox="0 0 100 100" className={className} style={{ width: size, height: size }}>
+        <defs>
+          <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#e0e7ff" />
+            <stop offset="50%" stopColor="#ddd6fe" />
+            <stop offset="100%" stopColor="#fce7f3" />
+          </linearGradient>
+          <linearGradient id="irisGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#818cf8" />
+            <stop offset="100%" stopColor="#c084fc" />
+          </linearGradient>
+        </defs>
+        <path d="M50 25 Q75 50 50 75 Q25 50 50 25" fill="none" stroke="#d1d5db" strokeWidth="1.5" />
+        <circle cx="50" cy="50" r="14" fill="url(#logoGrad)" />
+        <circle cx="50" cy="50" r="8" fill="url(#irisGrad)" />
+        <circle cx="50" cy="50" r="3" fill="#1f2937" />
+        <circle cx="47" cy="47" r="1.5" fill="white" opacity="0.9" />
+      </svg>
+    );
+
+    // ============== PREDICTION MARKET LOGIC ==============
+    const calculatePrices = (pools) => {
+      const total = pools.reduce((sum, p) => sum + p, 0);
+      return pools.map(p => total > 0 ? p / total : 1 / pools.length);
+    };
+
+    const calculateBuyCost = (pools, outcomeIndex, shares) => {
+      const k = pools.reduce((a, b) => a * b, 1);
+      const newPools = [...pools];
+      newPools[outcomeIndex] += shares;
+      const newProduct = newPools.reduce((a, b) => a * b, 1);
+      return Math.abs(shares * (newProduct / k - 1) * 0.1 + shares * (pools[outcomeIndex] / pools.reduce((a, b) => a + b, 0)));
+    };
+
+    // ============== LANDING PAGE ==============
+    function LandingPage() {
+      const [sub, setSub] = useState('');
+      const [billing, setBilling] = useState('monthly');
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-[#fafaf9] via-white to-[#f5f5f4]">
+          {/* Subtle prismatic background decoration */}
+          <div className="fixed inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute top-0 right-0 w-[600px] h-[600px] opacity-30"
+              style={{ background: 'radial-gradient(circle, rgba(255,182,193,0.2) 0%, rgba(186,225,255,0.15) 50%, transparent 70%)' }} />
+            <div className="absolute bottom-0 left-0 w-[500px] h-[500px] opacity-20"
+              style={{ background: 'radial-gradient(circle, rgba(218,186,255,0.2) 0%, rgba(186,255,201,0.1) 50%, transparent 70%)' }} />
+          </div>
+
+          {/* Nav */}
+          <nav className="relative z-10 border-b border-stone-200/60">
+            <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Logo size={28} />
+                <span className="text-lg font-semibold text-stone-800">vibes.markets</span>
+              </div>
+              <a href="#pricing" className="text-stone-500 hover:text-stone-800 transition-colors text-sm">Pricing</a>
+            </div>
+          </nav>
+
+          {/* Hero */}
+          <section className="relative z-10 max-w-5xl mx-auto px-6 pt-20 pb-24">
+            <div className="max-w-2xl">
+              <h1 className="text-5xl md:text-6xl font-bold text-stone-900 leading-[1.1] tracking-tight mb-6">
+                See what your group<br />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500">truly believes</span>
+              </h1>
+              <p className="text-lg text-stone-500 mb-10 leading-relaxed">
+                Private prediction markets for teams and communities.
+                Harness collective intelligence to forecast outcomes.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
+                <div className="flex-1 flex items-center glass rounded-xl border border-stone-200/80 overflow-hidden shadow-sm">
+                  <input
+                    type="text"
+                    placeholder="yourteam"
+                    value={sub}
+                    onChange={(e) => setSub(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                    className="flex-1 px-4 py-3.5 bg-transparent text-stone-800 placeholder-stone-400 focus:outline-none"
+                  />
+                  <span className="pr-4 text-stone-400 text-sm whitespace-nowrap flex-shrink-0">.vibes.markets</span>
+                </div>
+                <button
+                  onClick={() => sub && (window.location.href = `https://${sub}.${CONFIG.domain}`)}
+                  disabled={!sub}
+                  className="px-6 py-3.5 bg-stone-900 text-white font-medium rounded-xl hover:bg-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                >
+                  Get Started
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Features */}
+          <section className="relative z-10 max-w-5xl mx-auto px-6 py-16">
+            <div className="grid md:grid-cols-3 gap-6">
+              {[
+                { title: "Real-time Odds", desc: "AMM-powered pricing reflects collective sentiment as it shifts", icon: "◐" },
+                { title: "Start with 1000 ✧", desc: "Everyone gets equal starting capital to stake their predictions", icon: "✧" },
+                { title: "Leaderboards", desc: "Track who has the best forecasting track record", icon: "◆" }
+              ].map((f, i) => (
+                <div key={i} className="glass rounded-2xl border border-stone-200/60 p-6 shadow-sm prismatic-border">
+                  <span className="text-2xl text-stone-400 mb-4 block">{f.icon}</span>
+                  <h3 className="font-semibold text-stone-800 mb-2">{f.title}</h3>
+                  <p className="text-stone-500 text-sm leading-relaxed">{f.desc}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Pricing */}
+          <section id="pricing" className="relative z-10 max-w-5xl mx-auto px-6 py-20">
+            <div className="text-center mb-10">
+              <h2 className="text-3xl font-bold text-stone-900 mb-3">Simple, transparent pricing</h2>
+              <p className="text-stone-500">One plan. Unlimited everything.</p>
+            </div>
+
+            <div className="flex justify-center gap-2 mb-8">
+              {['monthly', 'yearly'].map(p => (
+                <button key={p} onClick={() => setBilling(p)}
+                  className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+                    billing === p ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  }`}>
+                  {p === 'monthly' ? 'Monthly' : 'Yearly'}
+                  {p === 'yearly' && <span className="ml-1.5 text-emerald-400">-17%</span>}
+                </button>
+              ))}
+            </div>
+
+            <div className="max-w-sm mx-auto glass rounded-2xl border border-stone-200/60 p-8 shadow-sm">
+              <div className="text-center mb-6">
+                <p className="text-4xl font-bold text-stone-900">
+                  ${billing === 'monthly' ? 9 : 7}<span className="text-lg font-normal text-stone-400">/mo</span>
+                </p>
+                {billing === 'yearly' && <p className="text-sm text-stone-400 mt-1">Billed annually ($90/year)</p>}
+              </div>
+              <ul className="space-y-3 mb-8 text-sm">
+                {["Unlimited markets", "Unlimited members", "Real-time charts", "Portfolio tracking", "Custom subdomain"].map((f, i) => (
+                  <li key={i} className="flex items-center gap-2.5 text-stone-600">
+                    <span className="text-emerald-500">✓</span> {f}
+                  </li>
+                ))}
+              </ul>
+              <button onClick={() => document.querySelector('input')?.focus()}
+                className="w-full py-3 bg-stone-900 text-white font-medium rounded-xl hover:bg-stone-800 transition-all">
+                Start Free Trial
+              </button>
+            </div>
+          </section>
+
+          <footer className="relative z-10 border-t border-stone-200/60 py-8">
+            <p className="text-center text-stone-400 text-sm">© {new Date().getFullYear()} vibes.markets</p>
+          </footer>
+        </div>
+      );
+    }
+
+    // ============== TENANT APP ==============
+    function TenantApp() {
+      const { isSignedIn, isLoaded, user } = useAuth();
+      const { database, useLiveQuery, useDocument } = useFireproof(`${CONFIG.appName}-${subdomain}`);
+
+      const [view, setView] = useState("dashboard");
+      const [selectedMarketId, setSelectedMarketId] = useState(null);
+      const [tradeAmount, setTradeAmount] = useState(10);
+      const [selectedOutcome, setSelectedOutcome] = useState(0);
+
+      const { docs: allUsers } = useLiveQuery("type", { key: "user" });
+      const { docs: allMarkets } = useLiveQuery("type", { key: "market" });
+      const { docs: allPositions } = useLiveQuery("type", { key: "position" });
+      const { docs: allTrades } = useLiveQuery("type", { key: "trade" });
+
+      const currentUser = allUsers.find(u => u.clerkId === user?.id);
+      const userPositions = allPositions.filter(p => p.userId === currentUser?._id);
+      const selectedMarket = allMarkets.find(m => m._id === selectedMarketId);
+
+      // Note: Tenant registration is now handled by SubscriptionGate
+
+      useEffect(() => {
+        if (isSignedIn && user && !allUsers.find(u => u.clerkId === user.id)) {
+          database.put({
+            type: "user", clerkId: user.id,
+            displayName: user.firstName || user.username || 'Forecaster',
+            email: user.primaryEmailAddress?.emailAddress,
+            balance: 1000, createdAt: Date.now()
+          });
+        }
+      }, [isSignedIn, user, allUsers]);
+
+      const { doc: newMarket, merge: mergeMarket, reset: resetMarket } = useDocument({
+        type: "market", question: "", outcomes: ["Yes", "No"], deadline: "", status: "active"
+      });
+
+      const createMarket = async () => {
+        if (!newMarket.question.trim() || !currentUser) return;
+        const outcomes = newMarket.outcomes.filter(o => o.trim());
+        if (outcomes.length < 2) return;
+        const { id } = await database.put({
+          type: "market", question: newMarket.question, outcomes,
+          pools: outcomes.map(() => 100), deadline: newMarket.deadline || null,
+          creatorId: currentUser._id, status: "active", resolution: null, createdAt: Date.now()
+        });
+        resetMarket();
+        setSelectedMarketId(id);
+        setView("market");
+      };
+
+      const executeTrade = async (isBuy = true) => {
+        if (!selectedMarket || !currentUser || tradeAmount <= 0) return;
+        const cost = calculateBuyCost(selectedMarket.pools, selectedOutcome, tradeAmount);
+        if (isBuy && cost > currentUser.balance) return;
+
+        const newPools = [...selectedMarket.pools];
+        newPools[selectedOutcome] += isBuy ? tradeAmount : -tradeAmount;
+        if (newPools[selectedOutcome] < 1) newPools[selectedOutcome] = 1;
+
+        await database.put({ ...selectedMarket, pools: newPools });
+        await database.put({ ...currentUser, balance: currentUser.balance + (isBuy ? -cost : cost * 0.95) });
+
+        await database.put({
+          type: "trade", marketId: selectedMarket._id, userId: currentUser._id,
+          outcomeIndex: selectedOutcome, shares: isBuy ? tradeAmount : -tradeAmount,
+          cost: isBuy ? cost : -cost * 0.95, prices: calculatePrices(newPools), timestamp: Date.now()
+        });
+
+        const existingPosition = allPositions.find(
+          p => p.marketId === selectedMarket._id && p.userId === currentUser._id && p.outcomeIndex === selectedOutcome
+        );
+        if (existingPosition) {
+          await database.put({
+            ...existingPosition,
+            shares: existingPosition.shares + (isBuy ? tradeAmount : -tradeAmount),
+            totalCost: existingPosition.totalCost + (isBuy ? cost : -cost)
+          });
+        } else if (isBuy) {
+          await database.put({
+            type: "position", marketId: selectedMarket._id, userId: currentUser._id,
+            outcomeIndex: selectedOutcome, shares: tradeAmount, totalCost: cost
+          });
+        }
+      };
+
+      const resolveMarket = async (winningIndex) => {
+        if (!selectedMarket || selectedMarket.creatorId !== currentUser?._id) return;
+        await database.put({ ...selectedMarket, status: "resolved", resolution: winningIndex });
+        const marketPositions = allPositions.filter(p => p.marketId === selectedMarket._id && p.outcomeIndex === winningIndex);
+        const totalWinningShares = marketPositions.reduce((sum, p) => sum + p.shares, 0);
+        const totalPool = selectedMarket.pools.reduce((sum, p) => sum + p, 0);
+        for (const pos of marketPositions) {
+          const posUser = allUsers.find(u => u._id === pos.userId);
+          if (posUser && totalWinningShares > 0) {
+            const payout = (pos.shares / totalWinningShares) * totalPool * 0.9;
+            await database.put({ ...posUser, balance: posUser.balance + payout });
+          }
+        }
+      };
+
+      const leaderboard = allUsers
+        .map(u => ({
+          ...u,
+          totalValue: u.balance + allPositions.filter(p => p.userId === u._id).reduce((sum, p) => {
+            const market = allMarkets.find(m => m._id === p.marketId);
+            if (!market || market.status === "resolved") return sum;
+            return sum + p.shares * calculatePrices(market.pools)[p.outcomeIndex] * 100;
+          }, 0)
+        }))
+        .sort((a, b) => b.totalValue - a.totalValue);
+
+      // Price Chart
+      const PriceChart = ({ marketId, outcomes }) => {
+        const trades = allTrades.filter(t => t.marketId === marketId && t.prices).sort((a, b) => a.timestamp - b.timestamp);
+        if (trades.length < 2) return <div className="glass rounded-xl p-4 text-center text-stone-400 text-sm border border-stone-200/60">Chart appears after 2+ trades</div>;
+        const w = 320, h = 100, pad = { t: 8, r: 8, b: 20, l: 32 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+        const tRange = [trades[0].timestamp, trades[trades.length - 1].timestamp];
+        const tSpan = tRange[1] - tRange[0] || 1;
+        const getX = ts => pad.l + ((ts - tRange[0]) / tSpan) * cw;
+        const getY = p => pad.t + (1 - p) * ch;
+        const colors = ['#10b981', '#f43f5e', '#8b5cf6', '#f59e0b'];
+
+        return (
+          <div className="glass rounded-xl p-4 border border-stone-200/60">
+            <p className="text-xs text-stone-400 mb-2">Price History</p>
+            <svg viewBox={`0 0 ${w} ${h}`} className="w-full">
+              {[0, 0.5, 1].map(v => (
+                <g key={v}>
+                  <line x1={pad.l} y1={getY(v)} x2={w - pad.r} y2={getY(v)} stroke="#e7e5e4" strokeDasharray="2,2" />
+                  <text x={pad.l - 4} y={getY(v)} fill="#a8a29e" fontSize="9" textAnchor="end" dominantBaseline="middle">{(v * 100).toFixed(0)}%</text>
+                </g>
+              ))}
+              {outcomes.map((_, i) => {
+                const pts = trades.map(t => ({ x: getX(t.timestamp), y: getY(t.prices[i]) }));
+                return (
+                  <g key={i}>
+                    <path d={pts.map((p, j) => `${j === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} fill="none" stroke={colors[i]} strokeWidth="2" strokeLinecap="round" />
+                    <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3" fill={colors[i]} />
+                  </g>
+                );
+              })}
+            </svg>
+            <div className="flex gap-4 mt-2 text-xs">
+              {outcomes.map((o, i) => (
+                <span key={i} className="flex items-center gap-1.5 text-stone-500">
+                  <span className="w-2 h-2 rounded-full" style={{ background: colors[i] }} />{o}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      };
+
+      const ProbabilityBar = ({ prices, outcomes }) => (
+        <div className="flex h-7 rounded-full overflow-hidden bg-stone-100">
+          {prices.map((price, i) => (
+            <div key={i} style={{ width: `${Math.max(price * 100, 2)}%` }}
+              className={`${i === 0 ? 'prob-yes' : i === 1 ? 'prob-no' : 'prob-alt'} flex items-center justify-center transition-all duration-500`}>
+              {price > 0.12 && <span className="text-xs font-medium text-white">{(price * 100).toFixed(0)}%</span>}
+            </div>
+          ))}
+        </div>
+      );
+
+      const NavItem = ({ icon, label, viewName }) => (
+        <button onClick={() => setView(viewName)}
+          className={`flex flex-col items-center gap-0.5 px-4 py-2 rounded-xl transition-all ${
+            view === viewName ? 'bg-stone-100 text-stone-900' : 'text-stone-400 hover:text-stone-600'
+          }`}>
+          <span className="text-lg">{icon}</span>
+          <span className="text-xs font-medium">{label}</span>
+        </button>
+      );
+
+      // Loading
+      if (!isLoaded) {
+        return (
+          <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center">
+            <div className="text-stone-400">Loading...</div>
+          </div>
+        );
+      }
+
+      // Auth screen
+      if (!isSignedIn) {
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-[#fafaf9] via-white to-[#f5f5f4] relative overflow-hidden">
+            {/* Subtle background accents */}
+            <div className="fixed inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute top-1/4 right-1/4 w-[400px] h-[400px] opacity-20"
+                style={{ background: 'radial-gradient(circle, rgba(199,210,254,0.5) 0%, transparent 70%)' }} />
+              <div className="absolute bottom-1/4 left-1/4 w-[300px] h-[300px] opacity-15"
+                style={{ background: 'radial-gradient(circle, rgba(251,207,232,0.5) 0%, transparent 70%)' }} />
+            </div>
+
+            <div className="relative z-10 min-h-screen flex flex-col">
+              <header className="p-6">
+                <div className="flex items-center gap-2">
+                  <Logo size={24} />
+                  <span className="text-sm font-medium text-stone-500">vibes.markets</span>
+                </div>
+              </header>
+
+              <main className="flex-1 flex flex-col items-center justify-center p-6 -mt-12">
+                <div className="text-center mb-10">
+                  <Logo size={64} className="mx-auto mb-6" />
+                  <h1 className="text-3xl font-bold text-stone-900 mb-2">{subdomain}</h1>
+                  <p className="text-stone-500">Prediction Market</p>
+                </div>
+
+                {/* Stats preview */}
+                <div className="flex gap-8 mb-10">
+                  <div className="text-center">
+                    <p className="text-2xl font-semibold text-stone-900">{allMarkets.filter(m => m.status === 'active').length}</p>
+                    <p className="text-xs text-stone-400">Active Markets</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-semibold text-stone-900">{allUsers.length}</p>
+                    <p className="text-xs text-stone-400">Members</p>
+                  </div>
+                </div>
+
+                {/* Auth buttons */}
+                <div className="space-y-3 w-full max-w-xs">
+                  <SignInButton className="w-full py-3.5 bg-stone-900 text-white font-medium rounded-xl hover:bg-stone-800 transition-all shadow-sm">
+                    Sign In
+                  </SignInButton>
+                  <SignUpButton className="w-full py-3.5 glass border border-stone-200/80 text-stone-700 font-medium rounded-xl hover:bg-white/80 transition-all">
+                    Create Account
+                  </SignUpButton>
+                </div>
+
+                <p className="mt-8 text-xs text-stone-400">Start with 1000 ✧ • Join instantly</p>
+              </main>
+            </div>
+          </div>
+        );
+      }
+
+      // Main app
+      return (
+        <div className="min-h-screen bg-[#fafaf9] pb-20">
+          <header className="sticky top-0 z-40 glass border-b border-stone-200/60">
+            <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Logo size={24} />
+                <span className="font-semibold text-stone-800">{subdomain}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                {currentUser && (
+                  <div className="text-right mr-1">
+                    <p className="text-sm font-semibold text-stone-900">{currentUser.balance.toFixed(0)} <span className="text-indigo-500">✧</span></p>
+                    <p className="text-xs text-stone-400">{currentUser.displayName}</p>
+                  </div>
+                )}
+                <UserButton />
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+            {/* Dashboard */}
+            {view === "dashboard" && (
+              <>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-stone-900">Markets</h2>
+                  <button onClick={() => setView("create")}
+                    className="px-4 py-2 bg-stone-900 text-white text-sm font-medium rounded-lg hover:bg-stone-800 transition-all">
+                    + New
+                  </button>
+                </div>
+                {allMarkets.filter(m => m.status === "active").length === 0 ? (
+                  <div className="glass rounded-2xl border border-stone-200/60 p-10 text-center">
+                    <p className="text-stone-400 mb-4">No active markets yet</p>
+                    <button onClick={() => setView("create")} className="text-indigo-600 font-medium hover:underline text-sm">
+                      Create the first one →
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {allMarkets.filter(m => m.status === "active").map(market => {
+                      const prices = calculatePrices(market.pools);
+                      return (
+                        <button key={market._id} onClick={() => { setSelectedMarketId(market._id); setView("market"); }}
+                          className="w-full glass rounded-2xl border border-stone-200/60 p-5 text-left hover:shadow-md transition-all prismatic-border">
+                          <p className="text-stone-800 font-medium mb-3">{market.question}</p>
+                          <ProbabilityBar prices={prices} outcomes={market.outcomes} />
+                          <div className="flex gap-4 mt-3 text-xs text-stone-400">
+                            {market.outcomes.map((o, i) => (
+                              <span key={i} className="flex items-center gap-1">
+                                <span className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-emerald-500' : i === 1 ? 'bg-rose-500' : 'bg-violet-500'}`} />
+                                {o}: {(prices[i] * 100).toFixed(0)}%
+                              </span>
+                            ))}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {allMarkets.filter(m => m.status === "resolved").length > 0 && (
+                  <div className="mt-8">
+                    <h3 className="text-xs font-medium text-stone-400 uppercase tracking-wide mb-3">Resolved</h3>
+                    <div className="space-y-2">
+                      {allMarkets.filter(m => m.status === "resolved").map(market => (
+                        <div key={market._id} className="bg-stone-50 rounded-xl p-4 border border-stone-100">
+                          <p className="text-stone-500 text-sm">{market.question}</p>
+                          <p className="text-emerald-600 text-sm mt-1 font-medium">✓ {market.outcomes[market.resolution]}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Create Market */}
+            {view === "create" && (
+              <div className="space-y-6">
+                <button onClick={() => setView("dashboard")} className="text-stone-400 hover:text-stone-600 text-sm flex items-center gap-1">← Back</button>
+                <div className="glass rounded-2xl border border-stone-200/60 p-6 space-y-5">
+                  <h2 className="text-lg font-semibold text-stone-900">Create Market</h2>
+                  <div>
+                    <label className="block text-sm text-stone-500 mb-2">Question</label>
+                    <input type="text" placeholder="Will Bitcoin reach $100k by end of year?"
+                      value={newMarket.question} onChange={(e) => mergeMarket({ question: e.target.value })}
+                      className="w-full px-4 py-3 bg-white border border-stone-200 rounded-xl text-stone-800 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/40 transition-all" />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-stone-500 mb-2">Outcomes</label>
+                    <div className="space-y-2">
+                      {newMarket.outcomes.map((outcome, i) => (
+                        <div key={i} className="flex gap-2">
+                          <input type="text" placeholder={`Outcome ${i + 1}`} value={outcome}
+                            onChange={(e) => { const o = [...newMarket.outcomes]; o[i] = e.target.value; mergeMarket({ outcomes: o }); }}
+                            className="flex-1 px-4 py-3 bg-white border border-stone-200 rounded-xl text-stone-800 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/40 transition-all" />
+                          {newMarket.outcomes.length > 2 && (
+                            <button onClick={() => mergeMarket({ outcomes: newMarket.outcomes.filter((_, j) => j !== i) })} className="px-3 text-stone-300 hover:text-rose-400 transition-colors">×</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {newMarket.outcomes.length < 6 && (
+                      <button onClick={() => mergeMarket({ outcomes: [...newMarket.outcomes, ""] })} className="mt-2 text-sm text-indigo-600 hover:underline">+ Add outcome</button>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm text-stone-500 mb-2">Deadline (optional)</label>
+                    <input type="datetime-local" value={newMarket.deadline} onChange={(e) => mergeMarket({ deadline: e.target.value })}
+                      className="w-full px-4 py-3 bg-white border border-stone-200 rounded-xl text-stone-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/40 transition-all" />
+                  </div>
+                  <button onClick={createMarket} disabled={!newMarket.question.trim() || newMarket.outcomes.filter(o => o.trim()).length < 2}
+                    className="w-full py-3.5 bg-stone-900 text-white font-medium rounded-xl hover:bg-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                    Create Market
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Market Detail */}
+            {view === "market" && selectedMarket && (
+              <div className="space-y-6">
+                <button onClick={() => setView("dashboard")} className="text-stone-400 hover:text-stone-600 text-sm flex items-center gap-1">← Back</button>
+                <div className="glass rounded-2xl border border-stone-200/60 p-6 space-y-5">
+                  <div>
+                    <h2 className="text-lg font-semibold text-stone-900">{selectedMarket.question}</h2>
+                    {selectedMarket.deadline && <p className="text-sm text-stone-400 mt-1">Closes: {new Date(selectedMarket.deadline).toLocaleDateString()}</p>}
+                  </div>
+                  <PriceChart marketId={selectedMarket._id} outcomes={selectedMarket.outcomes} />
+                  {selectedMarket.status === "active" ? (
+                    <>
+                      <div className="space-y-2">
+                        {selectedMarket.outcomes.map((outcome, i) => {
+                          const prices = calculatePrices(selectedMarket.pools);
+                          return (
+                            <button key={i} onClick={() => setSelectedOutcome(i)}
+                              className={`w-full p-4 rounded-xl border-2 transition-all flex items-center justify-between ${
+                                selectedOutcome === i ? 'border-indigo-500 bg-indigo-50/50' : 'border-stone-200 hover:border-stone-300'
+                              }`}>
+                              <span className="text-stone-800 font-medium">{outcome}</span>
+                              <span className={`text-xl font-bold ${i === 0 ? 'text-emerald-600' : i === 1 ? 'text-rose-500' : 'text-violet-600'}`}>
+                                {(prices[i] * 100).toFixed(1)}%
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="pt-4 border-t border-stone-200/60 space-y-4">
+                        <div>
+                          <label className="block text-sm text-stone-500 mb-2">Amount</label>
+                          <div className="flex gap-2">
+                            {[10, 25, 50, 100].map(amt => (
+                              <button key={amt} onClick={() => setTradeAmount(amt)}
+                                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                                  tradeAmount === amt ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}>
+                                {amt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-3">
+                          <button onClick={() => executeTrade(true)} disabled={!currentUser || calculateBuyCost(selectedMarket.pools, selectedOutcome, tradeAmount) > currentUser?.balance}
+                            className="flex-1 py-3.5 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                            Buy {selectedMarket.outcomes[selectedOutcome]}
+                            <span className="block text-xs opacity-80 mt-0.5">~{calculateBuyCost(selectedMarket.pools, selectedOutcome, tradeAmount).toFixed(0)} ✧</span>
+                          </button>
+                          <button onClick={() => executeTrade(false)}
+                            className="flex-1 py-3.5 bg-rose-500 text-white font-medium rounded-xl hover:bg-rose-600 transition-all">
+                            Sell
+                          </button>
+                        </div>
+                      </div>
+                      {selectedMarket.creatorId === currentUser?._id && (
+                        <div className="pt-4 border-t border-stone-200/60">
+                          <p className="text-sm text-stone-500 mb-3">Resolve market</p>
+                          <div className="flex gap-2 flex-wrap">
+                            {selectedMarket.outcomes.map((outcome, i) => (
+                              <button key={i} onClick={() => resolveMarket(i)}
+                                className="px-4 py-2 bg-stone-100 text-stone-700 text-sm rounded-lg hover:bg-emerald-100 hover:text-emerald-700 transition-all">
+                                {outcome} wins
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center py-6">
+                      <p className="text-emerald-600 text-lg font-semibold">✓ Resolved: {selectedMarket.outcomes[selectedMarket.resolution]}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Portfolio */}
+            {view === "portfolio" && currentUser && (
+              <div className="space-y-6">
+                <h2 className="text-lg font-semibold text-stone-900">Portfolio</h2>
+                <div className="glass rounded-2xl border border-stone-200/60 p-6">
+                  <p className="text-sm text-stone-500">Balance</p>
+                  <p className="text-3xl font-bold text-stone-900">{currentUser.balance.toFixed(0)} <span className="text-indigo-500">✧</span></p>
+                </div>
+                <h3 className="text-xs font-medium text-stone-400 uppercase tracking-wide">Positions</h3>
+                {userPositions.filter(p => p.shares > 0).length === 0 ? (
+                  <div className="bg-stone-50 rounded-xl p-6 text-center text-stone-400 text-sm">No active positions</div>
+                ) : (
+                  <div className="space-y-3">
+                    {userPositions.filter(p => p.shares > 0).map(pos => {
+                      const market = allMarkets.find(m => m._id === pos.marketId);
+                      if (!market) return null;
+                      const prices = calculatePrices(market.pools);
+                      const currentValue = pos.shares * prices[pos.outcomeIndex] * 100;
+                      const pnl = currentValue - pos.totalCost;
+                      return (
+                        <div key={pos._id} className="glass rounded-xl border border-stone-200/60 p-4">
+                          <p className="text-stone-600 text-sm mb-2">{market.question}</p>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="text-stone-800 font-medium">{market.outcomes[pos.outcomeIndex]}</span>
+                              <span className="text-stone-400 text-sm ml-2">{pos.shares} shares</span>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-stone-900 font-semibold">{currentValue.toFixed(0)} ✧</p>
+                              <p className={`text-sm ${pnl >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>{pnl >= 0 ? '+' : ''}{pnl.toFixed(0)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Leaderboard */}
+            {view === "leaderboard" && (
+              <div className="space-y-6">
+                <h2 className="text-lg font-semibold text-stone-900">Leaderboard</h2>
+                <div className="space-y-2">
+                  {leaderboard.map((u, rank) => (
+                    <div key={u._id} className={`flex items-center gap-4 p-4 rounded-xl ${
+                      u._id === currentUser?._id ? 'glass border border-indigo-200' : 'bg-stone-50'
+                    }`}>
+                      <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                        rank === 0 ? 'bg-amber-100 text-amber-700' :
+                        rank === 1 ? 'bg-stone-200 text-stone-600' :
+                        rank === 2 ? 'bg-orange-100 text-orange-700' : 'bg-stone-100 text-stone-500'
+                      }`}>
+                        {rank + 1}
+                      </span>
+                      <span className="flex-1 text-stone-800 font-medium">{u.displayName}</span>
+                      <span className="text-stone-900 font-bold">{u.totalValue.toFixed(0)} ✧</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </main>
+
+          <nav className="fixed bottom-0 left-0 right-0 glass border-t border-stone-200/60" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}>
+            <div className="max-w-2xl mx-auto flex justify-around py-2">
+              <NavItem icon="◐" label="Markets" viewName="dashboard" />
+              <NavItem icon="✧" label="Portfolio" viewName="portfolio" />
+              <NavItem icon="◆" label="Leaders" viewName="leaderboard" />
+            </div>
+          </nav>
+        </div>
+      );
+    }
+
+    // ============== ADMIN DASHBOARD ==============
+    function AdminDashboard() {
+      const { isSignedIn, isLoaded, user } = useAuth();
+      const [view, setView] = useState('overview');
+      const [stats, setStats] = useState({ users: 0, tenants: 0, revenue: 0, mrr: 0, activeSubscriptions: 0 });
+      const [tenants, setTenants] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [selectedTenant, setSelectedTenant] = useState(null);
+      const [searchQuery, setSearchQuery] = useState('');
+
+      // Simulated data for demo - in production would come from Clerk Billing API
+      const mockTenants = useMemo(() => [
+        { subdomain: 'acme', email: 'admin@acme.com', plan: 'yearly', status: 'active', users: 12, markets: 8, createdAt: Date.now() - 30 * 24 * 60 * 60 * 1000, mrr: 7.50 },
+        { subdomain: 'startup', email: 'team@startup.io', plan: 'monthly', status: 'active', users: 5, markets: 3, createdAt: Date.now() - 14 * 24 * 60 * 60 * 1000, mrr: 9 },
+        { subdomain: 'research', email: 'lab@research.edu', plan: 'yearly', status: 'active', users: 25, markets: 15, createdAt: Date.now() - 60 * 24 * 60 * 60 * 1000, mrr: 7.50 },
+        { subdomain: 'demo', email: 'demo@example.com', plan: 'trial', status: 'trial', users: 2, markets: 1, createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000, mrr: 0 },
+      ], []);
+
+      useEffect(() => {
+        if (isSignedIn) {
+          // Try to fetch real data, fallback to mock
+          Promise.all([
+            fetch('https://vibes.markets/api/stats').then(r => r.json()).catch(() => null),
+            fetch('https://vibes.markets/api/tenants').then(r => r.json()).catch(() => null)
+          ]).then(([s, t]) => {
+            if (s && t?.tenants) {
+              setStats(s);
+              setTenants(t.tenants);
+            } else {
+              // Use mock data for demo
+              setStats({
+                users: mockTenants.reduce((sum, t) => sum + t.users, 0),
+                tenants: mockTenants.length,
+                activeSubscriptions: mockTenants.filter(t => t.status === 'active').length,
+                mrr: mockTenants.reduce((sum, t) => sum + t.mrr, 0),
+                revenue: mockTenants.reduce((sum, t) => sum + t.mrr, 0) * 3
+              });
+              setTenants(mockTenants);
+            }
+            setLoading(false);
+          });
+        }
+      }, [isSignedIn, mockTenants]);
+
+      const filteredTenants = useMemo(() => {
+        if (!searchQuery) return tenants;
+        const q = searchQuery.toLowerCase();
+        return tenants.filter(t =>
+          t.subdomain.toLowerCase().includes(q) ||
+          t.email?.toLowerCase().includes(q)
+        );
+      }, [tenants, searchQuery]);
+
+      const statusColors = {
+        active: 'bg-emerald-100 text-emerald-700',
+        trial: 'bg-amber-100 text-amber-700',
+        canceled: 'bg-rose-100 text-rose-600',
+        pending: 'bg-stone-100 text-stone-500',
+        past_due: 'bg-orange-100 text-orange-700'
+      };
+
+      if (!isLoaded) {
+        return (
+          <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <Logo size={48} className="animate-pulse" />
+              <p className="text-stone-400">Loading admin...</p>
+            </div>
+          </div>
+        );
+      }
+
+      if (!isSignedIn) {
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-[#fafaf9] via-white to-[#f5f5f4] relative overflow-hidden">
+            <div className="fixed inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute top-1/4 right-1/4 w-[400px] h-[400px] opacity-20"
+                style={{ background: 'radial-gradient(circle, rgba(199,210,254,0.5) 0%, transparent 70%)' }} />
+            </div>
+            <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6">
+              <Logo size={72} className="mb-6" />
+              <h1 className="text-3xl font-bold text-stone-900 mb-2">Admin Dashboard</h1>
+              <p className="text-stone-500 mb-8">Manage your vibes.markets tenants</p>
+              <SignInButton className="px-8 py-3.5 bg-stone-900 text-white font-medium rounded-xl hover:bg-stone-800 transition-all shadow-sm">
+                Sign In to Continue
+              </SignInButton>
+            </div>
+          </div>
+        );
+      }
+
+      // Tenant Detail Modal
+      const TenantDetail = ({ tenant, onClose }) => (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+          <div className="glass rounded-2xl border border-stone-200/60 p-6 max-w-lg w-full max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-stone-900">{tenant.subdomain}.vibes.markets</h3>
+                <p className="text-stone-500 text-sm">{tenant.email}</p>
+              </div>
+              <button onClick={onClose} className="p-2 text-stone-400 hover:text-stone-600 transition-colors">✕</button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-stone-50 rounded-xl p-4">
+                <p className="text-xs text-stone-400 uppercase tracking-wide">Status</p>
+                <span className={`inline-block mt-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[tenant.status] || statusColors.pending}`}>
+                  {tenant.status}
+                </span>
+              </div>
+              <div className="bg-stone-50 rounded-xl p-4">
+                <p className="text-xs text-stone-400 uppercase tracking-wide">Plan</p>
+                <p className="text-stone-900 font-semibold mt-1">{tenant.plan}</p>
+              </div>
+              <div className="bg-stone-50 rounded-xl p-4">
+                <p className="text-xs text-stone-400 uppercase tracking-wide">Users</p>
+                <p className="text-stone-900 font-semibold mt-1">{tenant.users}</p>
+              </div>
+              <div className="bg-stone-50 rounded-xl p-4">
+                <p className="text-xs text-stone-400 uppercase tracking-wide">Markets</p>
+                <p className="text-stone-900 font-semibold mt-1">{tenant.markets}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex justify-between text-sm">
+                <span className="text-stone-500">Monthly Revenue</span>
+                <span className="text-stone-900 font-medium">${tenant.mrr?.toFixed(2) || '0.00'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-stone-500">Created</span>
+                <span className="text-stone-900">{new Date(tenant.createdAt).toLocaleDateString()}</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <a href={`https://${tenant.subdomain}.${CONFIG.domain}`} target="_blank" rel="noopener noreferrer"
+                className="flex-1 py-2.5 text-center bg-stone-900 text-white font-medium rounded-xl hover:bg-stone-800 transition-all text-sm">
+                Visit Tenant →
+              </a>
+              <button className="px-4 py-2.5 bg-stone-100 text-stone-600 font-medium rounded-xl hover:bg-stone-200 transition-all text-sm">
+                Manage
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="min-h-screen bg-[#fafaf9]">
+          {/* Header */}
+          <header className="glass border-b border-stone-200/60 sticky top-0 z-40">
+            <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Logo size={28} />
+                <span className="text-lg font-semibold text-stone-800">vibes.markets</span>
+                <span className="px-2 py-0.5 bg-stone-100 text-stone-500 text-xs font-medium rounded-full">Admin</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <a href={`https://${CONFIG.domain}`} className="text-stone-400 hover:text-stone-600 text-sm transition-colors">
+                  View Site →
+                </a>
+                <UserButton />
+              </div>
+            </div>
+          </header>
+
+          <div className="max-w-6xl mx-auto px-6 py-8">
+            {/* Navigation Tabs */}
+            <div className="flex gap-2 mb-8">
+              {[
+                { id: 'overview', label: 'Overview', icon: '◐' },
+                { id: 'tenants', label: 'Tenants', icon: '◆' },
+                { id: 'billing', label: 'Billing', icon: '✧' }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setView(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                    view === tab.id
+                      ? 'bg-stone-900 text-white'
+                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  }`}>
+                  <span>{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Overview */}
+            {view === 'overview' && (
+              <div className="space-y-8">
+                {/* Stats Grid */}
+                <div className="grid gap-4 md:grid-cols-4">
+                  {[
+                    { label: "Monthly Revenue", value: `$${stats.mrr?.toFixed(2) || '0.00'}`, sub: "MRR", color: "text-emerald-600" },
+                    { label: "Active Subscriptions", value: stats.activeSubscriptions || 0, sub: "paying tenants", color: "text-indigo-600" },
+                    { label: "Total Tenants", value: stats.tenants || 0, sub: "all time", color: "text-stone-900" },
+                    { label: "Total Users", value: stats.users || 0, sub: "across all tenants", color: "text-stone-900" }
+                  ].map((s, i) => (
+                    <div key={i} className="glass rounded-2xl border border-stone-200/60 p-5 prismatic-border">
+                      <p className="text-sm text-stone-500">{s.label}</p>
+                      <p className={`text-3xl font-bold mt-1 ${s.color}`}>{s.value}</p>
+                      <p className="text-xs text-stone-400 mt-1">{s.sub}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Recent Activity */}
+                <div className="glass rounded-2xl border border-stone-200/60 p-6">
+                  <h2 className="font-semibold text-stone-900 mb-4">Recent Tenants</h2>
+                  {loading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <p className="text-stone-400">Loading...</p>
+                    </div>
+                  ) : tenants.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-stone-400 mb-2">No tenants yet</p>
+                      <p className="text-stone-500 text-sm">Tenants will appear here when they sign up</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {tenants.slice(0, 5).map(t => (
+                        <div key={t.subdomain}
+                          onClick={() => setSelectedTenant(t)}
+                          className="flex items-center justify-between p-4 bg-stone-50 hover:bg-stone-100 rounded-xl transition-all cursor-pointer">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
+                              <span className="text-indigo-600 font-bold">{t.subdomain[0].toUpperCase()}</span>
+                            </div>
+                            <div>
+                              <p className="text-stone-800 font-medium">{t.subdomain}.vibes.markets</p>
+                              <p className="text-stone-400 text-sm">{t.users} users • {t.markets} markets</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[t.status] || statusColors.pending}`}>
+                              {t.status}
+                            </span>
+                            <span className="text-stone-400">→</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick Stats Chart */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="glass rounded-2xl border border-stone-200/60 p-6">
+                    <h3 className="font-semibold text-stone-900 mb-4">Subscription Breakdown</h3>
+                    <div className="space-y-3">
+                      {[
+                        { label: 'Yearly', count: tenants.filter(t => t.plan === 'yearly').length, color: 'bg-emerald-500' },
+                        { label: 'Monthly', count: tenants.filter(t => t.plan === 'monthly').length, color: 'bg-indigo-500' },
+                        { label: 'Trial', count: tenants.filter(t => t.plan === 'trial' || t.status === 'trial').length, color: 'bg-amber-500' }
+                      ].map(item => (
+                        <div key={item.label} className="flex items-center gap-3">
+                          <div className={`w-3 h-3 rounded-full ${item.color}`} />
+                          <span className="text-stone-600 flex-1">{item.label}</span>
+                          <span className="text-stone-900 font-medium">{item.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="glass rounded-2xl border border-stone-200/60 p-6">
+                    <h3 className="font-semibold text-stone-900 mb-4">Revenue Trend</h3>
+                    <div className="flex items-end gap-2 h-24">
+                      {[40, 55, 45, 70, 65, 80, stats.mrr ? 100 : 75].map((h, i) => (
+                        <div key={i} className="flex-1 bg-gradient-to-t from-indigo-500 to-purple-400 rounded-t-md transition-all"
+                          style={{ height: `${h}%` }} />
+                      ))}
+                    </div>
+                    <div className="flex justify-between mt-2 text-xs text-stone-400">
+                      <span>6 mo ago</span>
+                      <span>Now</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tenants */}
+            {view === 'tenants' && (
+              <div className="space-y-6">
+                {/* Search */}
+                <div className="flex gap-3">
+                  <div className="flex-1 relative">
+                    <input
+                      type="text"
+                      placeholder="Search tenants..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full px-4 py-3 pl-10 bg-white border border-stone-200 rounded-xl text-stone-800 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/40 transition-all"
+                    />
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400">⌕</span>
+                  </div>
+                  <select className="px-4 py-3 bg-white border border-stone-200 rounded-xl text-stone-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+                    <option>All Status</option>
+                    <option>Active</option>
+                    <option>Trial</option>
+                    <option>Canceled</option>
+                  </select>
+                </div>
+
+                {/* Tenants List */}
+                <div className="glass rounded-2xl border border-stone-200/60 overflow-hidden">
+                  <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-stone-50 border-b border-stone-200/60 text-xs font-medium text-stone-500 uppercase tracking-wide">
+                    <div className="col-span-4">Tenant</div>
+                    <div className="col-span-2">Plan</div>
+                    <div className="col-span-2">Status</div>
+                    <div className="col-span-2">Users</div>
+                    <div className="col-span-2">MRR</div>
+                  </div>
+                  {loading ? (
+                    <div className="px-6 py-12 text-center text-stone-400">Loading tenants...</div>
+                  ) : filteredTenants.length === 0 ? (
+                    <div className="px-6 py-12 text-center">
+                      <p className="text-stone-400 mb-1">No tenants found</p>
+                      <p className="text-stone-500 text-sm">Try adjusting your search</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-stone-100">
+                      {filteredTenants.map(t => (
+                        <div key={t.subdomain}
+                          onClick={() => setSelectedTenant(t)}
+                          className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-stone-50 transition-colors cursor-pointer items-center">
+                          <div className="col-span-4 flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center flex-shrink-0">
+                              <span className="text-indigo-600 font-bold text-sm">{t.subdomain[0].toUpperCase()}</span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-stone-800 font-medium truncate">{t.subdomain}</p>
+                              <p className="text-stone-400 text-xs truncate">{t.email}</p>
+                            </div>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-stone-600 text-sm capitalize">{t.plan}</span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[t.status] || statusColors.pending}`}>
+                              {t.status}
+                            </span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-stone-600 text-sm">{t.users}</span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-stone-900 font-medium text-sm">${t.mrr?.toFixed(2) || '0.00'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Billing */}
+            {view === 'billing' && (
+              <div className="space-y-6">
+                <div className="glass rounded-2xl border border-stone-200/60 p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="font-semibold text-stone-900">Billing Overview</h2>
+                    <a href="https://dashboard.clerk.com/apps" target="_blank" rel="noopener noreferrer"
+                      className="text-indigo-600 hover:text-indigo-700 text-sm font-medium transition-colors">
+                      Open Clerk Dashboard →
+                    </a>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-3 mb-8">
+                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl p-5">
+                      <p className="text-sm text-emerald-700">Monthly Recurring Revenue</p>
+                      <p className="text-3xl font-bold text-emerald-700 mt-1">${stats.mrr?.toFixed(2) || '0.00'}</p>
+                    </div>
+                    <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 rounded-xl p-5">
+                      <p className="text-sm text-indigo-700">Annual Run Rate</p>
+                      <p className="text-3xl font-bold text-indigo-700 mt-1">${((stats.mrr || 0) * 12).toFixed(2)}</p>
+                    </div>
+                    <div className="bg-gradient-to-br from-stone-50 to-stone-100 rounded-xl p-5">
+                      <p className="text-sm text-stone-600">Total Revenue (Est.)</p>
+                      <p className="text-3xl font-bold text-stone-900 mt-1">${stats.revenue?.toFixed(2) || '0.00'}</p>
+                    </div>
+                  </div>
+
+                  <h3 className="font-medium text-stone-700 mb-3">Subscription Status</h3>
+                  <div className="space-y-2">
+                    {[
+                      { status: 'active', label: 'Active Subscriptions', count: tenants.filter(t => t.status === 'active').length },
+                      { status: 'trial', label: 'In Trial', count: tenants.filter(t => t.status === 'trial').length },
+                      { status: 'canceled', label: 'Canceled', count: tenants.filter(t => t.status === 'canceled').length }
+                    ].map(item => (
+                      <div key={item.status} className="flex items-center justify-between p-3 bg-stone-50 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${
+                            item.status === 'active' ? 'bg-emerald-500' :
+                            item.status === 'trial' ? 'bg-amber-500' : 'bg-rose-400'
+                          }`} />
+                          <span className="text-stone-600">{item.label}</span>
+                        </div>
+                        <span className="text-stone-900 font-medium">{item.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="glass rounded-2xl border border-stone-200/60 p-6">
+                  <h3 className="font-semibold text-stone-900 mb-4">Pricing Configuration</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="bg-stone-50 rounded-xl p-5">
+                      <p className="text-xs text-stone-400 uppercase tracking-wide mb-2">Monthly Plan</p>
+                      <p className="text-2xl font-bold text-stone-900">${CONFIG.pricing.monthly}<span className="text-base font-normal text-stone-400">/mo</span></p>
+                    </div>
+                    <div className="bg-stone-50 rounded-xl p-5">
+                      <p className="text-xs text-stone-400 uppercase tracking-wide mb-2">Yearly Plan</p>
+                      <p className="text-2xl font-bold text-stone-900">${CONFIG.pricing.yearly}<span className="text-base font-normal text-stone-400">/yr</span></p>
+                      <p className="text-xs text-emerald-600 mt-1">Save ${CONFIG.pricing.monthly * 12 - CONFIG.pricing.yearly}/year</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tenant Detail Modal */}
+          {selectedTenant && <TenantDetail tenant={selectedTenant} onClose={() => setSelectedTenant(null)} />}
+        </div>
+      );
+    }
+
+    // ============== MAIN ==============
+    function App() {
+      if (isAdmin) return <AdminDashboard />;
+      if (isTenant) return <SubscriptionGate><TenantApp /></SubscriptionGate>;
+      return <LandingPage />;
+    }
+
+    ReactDOMClient.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

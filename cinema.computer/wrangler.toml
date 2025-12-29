@@ -1,0 +1,25 @@
+# Cloudflare Worker configuration for my-app
+#
+# Prerequisites:
+#   1. Create KV namespace: wrangler kv namespace create TENANTS
+#   2. Copy the namespace ID below
+#   3. Update PAGES_HOSTNAME with your Pages project URL
+#   4. Deploy: wrangler deploy
+#   5. Set secret: wrangler secret put CLERK_SECRET_KEY
+
+name = "cinema-computer-wildcard"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+[vars]
+PAGES_HOSTNAME = "cinema-computer.pages.dev"
+APP_DOMAIN = "cinema.computer"
+
+[[kv_namespaces]]
+binding = "TENANTS"
+id = "17e5c9f2fea442a68da19d05396272f6"
+
+# ============================================================
+# Routes are configured via Cloudflare API by deploy-sell.js
+# Do NOT add routes here - they cause conflicts with existing workers
+# ============================================================
