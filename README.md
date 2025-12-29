@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="The Knitting Computer" width="180" />
+</p>
+
 # knitting.computer
 
 AI-powered knitting pattern generator. Describe your ideal sweater and get a complete, production-ready pattern with AI-generated preview images.
